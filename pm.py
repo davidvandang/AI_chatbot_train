@@ -1,18 +1,9 @@
-import datetime
-
 import numpy as np
 import pandas as pd
 
 data_folder_path = 'data'
 year_folders = [str(year) for year in range(2017, 2023)]
 
-set_column_type = {'rid': int, 'tpl': str, 'pta': datetime.datetime, 'ptd': datetime.datetime, 'wta': datetime.datetime,
-                   'wtp': datetime.datetime, 'wtd': datetime.datetime
-    , 'arr_et': datetime.datetime, 'arr_wet': datetime.datetime, 'arr_atRemoved': bool, 'pass_et': datetime.datetime,
-                   'pass_wet': datetime.datetime, 'pass_atRemoved': bool
-    , 'dep_et': datetime.datetime, 'dep_wet': datetime.datetime, 'dep_atRemoved': bool, 'arr_at': datetime.datetime,
-                   'pass_at': datetime.datetime, 'dep_at': datetime.datetime
-    , 'cr_code': int, 'lr_code': int}
 
 # Create an empty list to store the DataFrames
 data_frames = []
@@ -34,6 +25,9 @@ for year_folder in year_folders:
 # Put all DataFrames together using np.concatenate and convert the result back to a DataFrame
 all_data = pd.DataFrame(np.concatenate(data_frames), columns=temp_data.columns)
 all_data.reset_index(drop=True, inplace=True)
-all_data = all_data.astype(set_column_type)
+print(all_data.shape)
+# print(all_data.head())
 
-all_data.shape
+# Check for null values
+print(all_data.isnull().sum())
+
