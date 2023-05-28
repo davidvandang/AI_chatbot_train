@@ -1,8 +1,3 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-
-
 import numpy as np
 import pandas as pd
 import glob
@@ -12,208 +7,94 @@ from datetime import datetime, time, date
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_squared_error
-
-
-
-path = 'data'
-all_files = glob.glob(os.path.join(path, "*.csv"))
-
-df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
-
-
-
-
-print(df)
-
-
-# drop every train which does not have any data in arr_at (recorded actual time of arrival)
-df_ar = df.dropna(axis=0, subset=['arr_at'])
-print(df_ar)
-
-
-# Keeping only columns: rid, tpl, pta, ptd, arr_at, dep_at
-
-df_ar = df_ar.drop(columns=['arr_et', 'dep_et', 'wta', 'wtp', 'wtd', 'arr_wet', 'arr_atRemoved', 'pass_et', 'pass_wet', 'pass_atRemoved', 'dep_wet',
-                           'dep_atRemoved', 'pass_at', 'cr_code', 'lr_code'])
-df_ar.reset_index()
-print(df_ar)
-
-
-df_ar.isnull().sum()
-
-
-# Convert the columns into datetime
-df_ar['pta'] = pd.to_datetime(df_ar['pta'], format='%H:%M')
-df_ar['ptd'] = pd.to_datetime(df_ar['ptd'], format='%H:%M')
-df_ar['arr_at'] = pd.to_datetime(df_ar['arr_at'], format='%H:%M')
-df_ar['dep_at'] = pd.to_datetime(df_ar['dep_at'], format='%H:%M')
-
-print(df_ar.dtypes)
- 
-
-
-
-# Convert the columns into time
-df_ar['pta'] = df_ar['pta'].dt.time
-df_ar['ptd'] = df_ar['ptd'].dt.time
-df_ar['arr_at'] = df_ar['arr_at'].dt.time
-df_ar['dep_at'] = df_ar['dep_at'].dt.time
-
-print(df_ar.dtypes)
-
-
-# If pta is null this means the train came on time, so replace pta with arr_at
-df_ar['pta'].fillna(df_ar['arr_at'], inplace=True)
-
-print(df_ar.isnull().sum())
-print(df_ar)
-
-
-
-
-# Convert rid into a str
-df_ar['rid'] = df['rid'].astype(str)
-
-# Add date column derived from rid
-df_ar['date'] = df_ar['rid'].str[:8]
-
-
-# The delay time for arrival and depature
-def delay_time(actual, planned):
-    actual_times = df_ar[actual].apply(lambda x: datetime.combine(date.min, x)if not pd.isnull(x) else x)
-    planned_times = df_ar[planned].apply(lambda x: datetime.combine(date.min, x)if not pd.isnull(x) else x)
-    delay_time_difference = (actual_times - planned_times).apply(lambda x: x.total_seconds() / 60)
-    return delay_time_difference
-
-
-# Add columns arr_delay and dep_delay
-df_ar['arr_delay'] = delay_time('arr_at','pta')
-df_ar['dep_delay'] = delay_time('dep_at','ptd')
-
-
-# Termmination column, which shows if there a null in ptd/dep_at = the train has terminated
-df_ar['termination'] = ((df_ar['ptd'].isnull()) | (df_ar['dep_at'].isnull())).astype(int)
-
-
-# Start column, shows if there is a null in arr_at/pta = the train has started here
-#df_ar['start'] = ((df_ar['pta'].isnull()) | (df_ar['arr_at'].isnull())).astype(int)
-
-print(df_ar)
-
-
-# Make a model for each train station
-number_stations = df_ar['tpl'].nunique()
-name_stations = df_ar['tpl'].unique()
-
-print("Number of unique stations:", number_stations)
-print("Name of unique stations:", name_stations)
-counts = df_ar['tpl'].value_counts()
-print(counts)
-
-
-# Convert columns pta, ptd, arr_at, dep_at into int
-for col in ['pta', 'ptd', 'arr_at', 'dep_at']:
-    df_ar[col+'_int'] = df_ar[col].apply(lambda x: int(x.strftime('%H%M%S')) if pd.notnull(x) else x)
-
-# Encode tpl column
 from sklearn import preprocessing
-label_encoder = preprocessing.LabelEncoder()
-df_ar['tpl_encoded']= label_encoder.fit_transform(df_ar['tpl'])
 
-name_stations = df_ar['tpl'].unique()
-print("Name of unique stations:", name_stations)
+class TrainDelayPredictor:
+    def __init__(self, path='data'):
+        self.path = path
+        self.df = None
+        self.number_stations = None
+        self.name_stations = None
+        self.label_encoder = preprocessing.LabelEncoder()
+        self.stationModels = {}
 
-print(df_ar)
+    def load_data(self):
+        # Fetch all CSV files and concatenate them into a dataframe
+        all_files = glob.glob(os.path.join(self.path, "*.csv"))
+        self.df = pd.concat((pd.read_csv(f) for f in all_files), ignore_index=True)
+        # print(self.df)
+    def clean_data(self):
+        # Remove rows where 'arr_at' is missing (NaN)
+        self.df.dropna(axis=0, subset=['arr_at'], inplace=True)
+        # Drop irrelevant columns
+        columns_to_drop = ['arr_et', 'dep_et', 'wta', 'wtp', 'wtd', 'arr_wet', 'arr_atRemoved', 'pass_et', 'pass_wet',
+                           'pass_atRemoved', 'dep_wet', 'dep_atRemoved', 'pass_at', 'cr_code', 'lr_code']
+        self.df.drop(columns=columns_to_drop, inplace=True)
+        # Reset index after dropping rows
+        self.df.reset_index(drop=True, inplace=True)
+        # Convert necessary columns into datetime format
+        self.convert_columns_to_datetime()
 
+    def convert_columns_to_datetime(self):
+        # Convert to datetime and then extract time only
+        for col in ['pta', 'ptd', 'arr_at', 'dep_at']:
+            self.df[col] = pd.to_datetime(self.df[col], format='%H:%M').dt.time
+        # If 'pta' is missing, consider the train came on time, hence replace 'pta' with 'arr_at'
+        self.df['pta'].fillna(self.df['arr_at'], inplace=True)
 
-# Random Forest Classifier for arrival 
-stationModels = {}
+    def preprocess_data(self):
+        # Convert 'rid' into a str
+        self.df['rid'] = self.df['rid'].astype(str)
+        # Add 'date' column derived from 'rid'
+        self.df['date'] = self.df['rid'].str[:8]
+        # Add columns 'arr_delay' and 'dep_delay' to store delay times
+        self.df['arr_delay'] = self.delay_time('arr_at','pta')
+        self.df['dep_delay'] = self.delay_time('dep_at','ptd')
+        # Add 'termination' column, which shows if there a null in 'ptd'/'dep_at' = the train has terminated
+        self.df['termination'] = ((self.df['ptd'].isnull()) | (self.df['dep_at'].isnull())).astype(int)
+        # Count number of unique stations and list their names
+        self.number_stations = self.df['tpl'].nunique()
+        self.name_stations = self.df['tpl'].unique()
+        # Convert time columns to int for model training
+        for col in ['pta', 'ptd', 'arr_at', 'dep_at']:
+            self.df[col+'_int'] = self.df[col].apply(lambda x: int(x.strftime('%H%M%S')) if pd.notnull(x) else x)
+        # Encode 'tpl' column
+        self.df['tpl_encoded']= self.label_encoder.fit_transform(self.df['tpl'])
 
-# Get the count of occurrences of each station
-station_counts = df_ar['tpl'].value_counts()
+    def delay_time(self, actual, planned):
+        # Calculate delay time
+        actual_times = self.df[actual].apply(lambda x: datetime.combine(date.min, x)if not pd.isnull(x) else x)
+        planned_times = self.df[planned].apply(lambda x: datetime.combine(date.min, x)if not pd.isnull(x) else x)
+        delay_time_difference = (actual_times - planned_times).apply(lambda x: x.total_seconds() / 60)
+        return delay_time_difference
 
-# Make a model for each train station with more than 1 mention
-name_stations = station_counts[station_counts > 1].index
+    def train_model(self):
+        # Get the count of occurrences of each station
+        station_counts = self.df['tpl'].value_counts()
+        # Make a model for each train station with more than 1 mention
+        name_stations = station_counts[station_counts > 1].index
+        for station in name_stations:
+            station_df = self.df[self.df['tpl'] == station]
+            if (station_df[station_df['termination'] == 1].any):
+                X = station_df[['rid', 'tpl_encoded', 'pta_int', 'arr_at_int', 'date', 'termination']]
+            else:
+                X = station_df[['rid', 'tpl_encoded', 'pta_int', 'ptd_int', 'arr_at_int', 'dep_at_int', 'date', 'termination']]
+            y = station_df['arr_delay']
+            X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)
+            clf = RandomForestRegressor()
+            clf.fit(X_train, y_train)
+            self.stationModels[station] = (clf, X_train, X_test, y_train, y_test)
 
-def train_model():
-    for station in name_stations:
-        
-        station_df = df_ar[df_ar['tpl'] == station]
+    def evaluate_models(self):
+        for station, (model, X_train, X_test, y_train, y_test) in self.stationModels.items():
+            y_pred = model.predict(X_test)
+            mse = mean_squared_error(y_test, y_pred)
+            rmse = np.sqrt(mse)
+            print(f"RMSE for {station}: {np.round(rmse, 2)}")
 
-        # If termination is 1 (true), then use the columns without null
-        if (station_df[station_df['termination'] == 1].any):
-            X = station_df[['rid', 'tpl_encoded', 'pta_int', 'arr_at_int', 'date', 'termination']]
-            
-        else:
-            X = station_df[['rid', 'tpl_encoded', 'pta_int', 'ptd_int', 'arr_at_int', 'dep_at_int', 'date', 'termination']]
-                           
-        # Preprocessing data
-        y = station_df['arr_delay']
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.33, random_state=42)   
-
-        # Create the model
-        clf = RandomForestRegressor()
-        clf.fit(X_train, y_train)
-
-        stationModels[station] = clf
-        
-    return stationModels
-
-# Train the models
-stationModels = train_model()
-
-# Evaluate the models
-for station, (model, X_train, X_test, y_train, y_test) in stationModels.items():
-    y_pred = model.predict(X_test)
-    mse = mean_squared_error(y_test, y_pred)
-    rmse = np.sqrt(mse)
-    print(f"RMSE for {station}: {np.round(rmse, 2)}")
-
-def prediction_arrival_time_delay(current_station, actual_departure_time, delay_time, destination):
-    # Train model
-    stationModels = train_model()
-
-    # Find route
-    route = df_ar[(df_ar['tpl'] == current_station) & (df_ar['dep_at'] == actual_departure_time)].sort_values(by=['arr_at'])
-
-    # If there are no matching rows for the current station and departure time, return None
-    if route.empty:
-        return None
-
-    # Current stop is the only row in the route
-    current_stop = route.iloc[0]
-
-    # Find the index of the current stop in the original df_ar DataFrame
-    current_stop_index = df_ar.index[df_ar['rid'] == current_stop['rid']][0]
-
-    # Select all rows from df_ar starting from current_stop_index
-    remaining_stops = df_ar.loc[current_stop_index:]
-
-    # Convert delay_time to timedelta
-    delay_time = pd.to_timedelta(delay_time, unit='m')
-
-    predicted_arrival_time = None
-
-    # Iterate through the next stop from current_stop until destination
-    for _, stop in remaining_stops.iterrows():
-        # arrival time + delay for each stop
-        stop['arr_at'] = pd.to_datetime(stop['arr_at']) + delay_time
-
-        # destination reached, break loop
-        if stop['tpl'] == destination:
-            predicted_arrival_time = stop['arr_at']
-            break
-
-    return predicted_arrival_time
-
-current_station = "WOKING"
-departure_time = "09:59"  # Example: departure time from Southampton
-delay_time = 10  # 10-minute delay
-destination = "SOTON"
-
-test_1 = prediction_arrival_time_delay(current_station,departure_time, delay_time, destination)
-print (test_1)
-
-
-
-
+predictor = TrainDelayPredictor()
+predictor.load_data()
+predictor.clean_data()
+predictor.preprocess_data()
+#predictor.train_model()
+#predictor.evaluate_models()
