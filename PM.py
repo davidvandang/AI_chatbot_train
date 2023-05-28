@@ -85,16 +85,16 @@ class TrainDelayPredictor:
             clf.fit(X_train, y_train)
             self.stationModels[station] = (clf, X_train, X_test, y_train, y_test)
 
-    def evaluate_models(self):
-        for station, (model, X_train, X_test, y_train, y_test) in self.stationModels.items():
-            y_pred = model.predict(X_test)
-            mse = mean_squared_error(y_test, y_pred)
-            rmse = np.sqrt(mse)
-            print(f"RMSE for {station}: {np.round(rmse, 2)}")
+    def evaluate_models(self, station):
+        model, X_train, X_test, y_train, y_test = self.stationModels[station]
+        y_pred = model.predict(X_test)
+        mse = mean_squared_error(y_test, y_pred)
+        rmse = np.sqrt(mse)
+        print(f"RMSE for {station}: {np.round(rmse, 2)}")
 
 predictor = TrainDelayPredictor()
 predictor.load_data()
 predictor.clean_data()
 predictor.preprocess_data()
-#predictor.train_model()
-#predictor.evaluate_models()
+predictor.train_model()
+predictor.evaluate_models("WOKING")
